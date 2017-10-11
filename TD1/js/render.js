@@ -1,26 +1,23 @@
 document.addEventListener("keyup", keyupFunction);
 document.addEventListener("keydown", keydownFunction);
-
-/*pointerlock*/
-document.addEventListener("pointerlockchange", pointerlockchange);
-document.addEventListener("mozpointerlockchange", pointerlockchange);
-document.addEventListener("webkitpointerlockchange", pointerlockchange);
-
-
 window.addEventListener("resize", onWindowResize);
+document.addEventListener("click", clickFunction);
 
-var container, stats, renderer,  controls;
-var scene, sceneOrto;
+
+var container, stats, renderer, colorPickRenderTexture, controls;
+var scene, sceneOrto, sceneHide;
 var camera, cameraOrto;
-var cube, line;
+var cube, line, cubeClone;
 
 /*Keyboards*/
 var up = false;
 var right = false;
 var down = false;
 var left = false;
-
 var clock, velocity;
+
+var pickingMat;
+var mouse = new THREE.Vector2();
 
 function init() {
 
@@ -30,6 +27,7 @@ function init() {
   /*scene*/
   scene = new THREE.Scene();
   sceneOrto = new THREE.Scene();
+  sceneHide = new THREE.Scene();
 
   /*camera*/   /*OrthographicCamera( left, right, top, bottom, near, far )*/
   camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
@@ -38,6 +36,10 @@ function init() {
 
   /*renderer*/
   renderer = new THREE.WebGLRenderer();
+
+  colorPickRenderTexture = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight);
+  colorPickRenderTexture.texture.minFilter = THREE.LinearFilter;
+
   /*add render to page with the good size*/
   renderer.setSize( window.innerWidth, window.innerHeight );
   renderer.setPixelRatio( window.devicePixelRatio );
@@ -72,7 +74,7 @@ function init() {
   var mat_sand = new THREE.MeshBasicMaterial( { map: txt_sand });
   /*line material*/
   var mat_line = new THREE.LineBasicMaterial({ color: 0x0000ff });
-keydownFunction
+
   var materialArray  = new Array();
   materialArray.push(new THREE.MeshBasicMaterial( { map: txt_tnt1 }));
   materialArray.push(new THREE.MeshBasicMaterial( { map: txt_tnt1 }));
@@ -81,11 +83,17 @@ keydownFunction
   materialArray.push(new THREE.MeshBasicMaterial( { map: txt_tnt1 }));
   materialArray.push(new THREE.MeshBasicMaterial( { map: txt_tnt1 }));
 
+  pickingMat = new THREE.MeshBasicMaterial( { vertexColors: THREE.FaceColors });
 
   /*mesh use geometrie and apply material*/
   cube = new THREE.Mesh( geometry, materialArray );
   cube.position.set(0,0,0);
   scene.add( cube );
+
+  cubeClone = new THREE.Mesh( cube.geometry.clone(), pickingMat);
+  applyFaceColor(cubeClone.geometry, cubeClone.id);
+  cubeClone.position.set(0,0,0);
+  sceneHide.add( cubeClone );
 
   line = new THREE.Line(geo_linecross, mat_line);
   sceneOrto.add( line );
@@ -96,28 +104,38 @@ keydownFunction
   for (var i = -10; i<10;i++)
   {
     for (var j = -10; j<10;j++){
-      cube = new THREE.Mesh( geometry, mat_brick );keydownFunction
+      cube = new THREE.Mesh( geometry, mat_brick );
       cube.position.set(i,-1,j);
-      scene.add( cube );scene
+      scene.add( cube );
+
+      cubeClone = new THREE.Mesh( cube.geometry.clone(), pickingMat);
+      //IL Faut forcer la clonation de lq geometry
+      applyFaceColor(cubeClone.geometry, cubeClone.id);
+      cubeClone.position.set(i,-1,j);
+      sceneHide.add( cubeClone );
    }
  }
 
   /*Sable*/
   for (var i = -10; i<10;i++)
-  {
+  {      //mat_brick pickingMat
     for (var j = -10; j<10;j++){
       cube = new THREE.Mesh( geometry, mat_sand );
       cube.position.set(i,-2,j);
       scene.add( cube );
+      //il faut le material
+      cubeClone = new THREE.Mesh( cube.geometry.clone(), pickingMat);
+      applyFaceColor(cubeClone.geometry, cubeClone.id);
+      cubeClone.position.set(i,-2,j);
+      sceneHide.add( cubeClone );
+
+      console.log(cubeClone.id  +"-"+cube.id);
+
    }
   }
 
-  controlInit();document.addEventListener("pointerlockchange", keydownFunction);
-document.addEventListener("mozpointerlockchange", keydownFunction);
-
-
+  controlInit();
   camera.position.y = -1;
-
   // statskeydownFunction
   stats = new Stats();
   container.appendChild( stats.dom );
@@ -127,8 +145,6 @@ document.addEventListener("mozpointerlockchange", keydownFunction);
 function animate() {
   requestAnimationFrame( animate );
   render();
-  //controls.update(delta);
-  //controls.update();
   stats.update();
 
 }
@@ -137,11 +153,7 @@ function controlInit() {
   controls = new THREE.PointerLockControls( camera, renderer.domElement );
   controls.enabled = true;
   scene.add( controls.getObject() );
-
-  /*controls.zoomSpeed = 1.2;
-  controls.panSpeed = 0.8;
-  controls.noZoom = false;
-  controls.noPan = false;*/
+  sceneHide.add( controls.getObject() );
 }
 
 function onWindowResize() {
@@ -194,12 +206,42 @@ function render() {
 
   controls.getObject().translateX( velocity.x * delta );
   controls.getObject().translateZ( velocity.z * delta );
-  renderer.clear();
-  renderer.render( scene, camera );
+  //hide texture
+  //IL FAUT POUR EFFACER LE RENDER BIEN
   renderer.clearDepth();
+  renderer.clear();
+  renderer.clearTarget( colorPickRenderTexture, true, true, true );
+
+  renderer.render( sceneHide, camera, colorPickRenderTexture );
+  renderer.render( scene, camera );
   renderer.render( sceneOrto, cameraOrto );
 }
 
-function pointerlockchange() {
+function applyFaceColor( geom, color ) {
+	geom.faces.forEach( function( f ) {
+		f.color.setHex(color);
+	} );
+}
 
+function clickFunction(e){
+  pick();
+}
+
+function pick(){
+    //create buffer for reading single pixel
+  var pixelBuffer = new Uint8Array( 4 );
+  renderer.readRenderTargetPixels(colorPickRenderTexture, window.innerWidth / 2, window.innerHeight / 2, 1, 1, pixelBuffer);
+  //interpret the pixel as an ID
+  var id = ( pixelBuffer[0] << 16 ) | ( pixelBuffer[1] << 8 ) | ( pixelBuffer[2] );
+  //console.log(id);
+  scene.remove(scene.getObjectById( id -1));
+  sceneHide.remove(sceneHide.getObjectById( id));
+
+  /*var object = scene.getObjectById( id );
+  if (!object) {
+    return;
+  }
+  else {
+    object.parent.remove(object);
+  }*/
 }
